@@ -1,0 +1,33 @@
+name: Auto Convert OmniBox
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # 每天自动更新
+  workflow_dispatch:      # 支持手动触发
+  push:
+    paths:
+      - "pool.json"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Convert
+        run: node convert.mjs
+
+      - name: Commit changes
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add omnibox.json
+          git commit -m "auto update omnibox" || echo "no changes"
+          git push
