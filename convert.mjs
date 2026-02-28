@@ -11,12 +11,35 @@ function isHttp(str) {
   return typeof str === "string" && str.startsWith("http");
 }
 
-let rawItems = [];
+async function testSpeed(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
 
+  const start = Date.now();
+  try {
+    await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    return Date.now() - start;
+  } catch {
+    return null;
+  }
+}
+
+let rawItems = [];
+let stats = {
+  totalSources: 0,
+  extractedApis: 0,
+  validApis: 0,
+  invalidApis: 0
+};
+
+// ===== 读取源 =====
 for (const url of urls) {
   try {
     const res = await fetch(url);
     const data = await res.json();
+
+    stats.totalSources++;
 
     if (Array.isArray(data)) {
       rawItems.push(...data);
@@ -25,11 +48,12 @@ for (const url of urls) {
     }
 
     console.log("读取成功:", url);
-  } catch (err) {
+  } catch {
     console.log("读取失败:", url);
   }
 }
 
+// ===== 提取接口 =====
 let extracted = [];
 
 for (const item of rawItems) {
@@ -48,12 +72,40 @@ for (const item of rawItems) {
   }
 }
 
+stats.extractedApis = extracted.length;
+
+// ===== 去重 =====
 const unique = new Map();
 for (const item of extracted) {
   unique.set(item.api, item);
 }
 
-const converted = Array.from(unique.values()).map(item => ({
+let uniqueItems = Array.from(unique.values());
+
+// ===== 测速检测 =====
+let validItems = [];
+
+for (const item of uniqueItems) {
+  const speed = await testSpeed(item.api);
+
+  if (speed !== null) {
+    validItems.push({
+      ...item,
+      speed
+    });
+    stats.validApis++;
+    console.log("有效:", item.api, speed + "ms");
+  } else {
+    stats.invalidApis++;
+    console.log("失效:", item.api);
+  }
+}
+
+// ===== 按速度排序 =====
+validItems.sort((a, b) => a.speed - b.speed);
+
+// ===== 生成 OmniBox 格式 =====
+const omnibox = validItems.map(item => ({
   id: uuid(),
   key: item.name,
   name: item.name,
@@ -62,16 +114,24 @@ const converted = Array.from(unique.values()).map(item => ({
   isActive: 1,
   time: new Date().toISOString(),
   isDefault: 0,
-  remark: "",
+  remark: "speed:" + item.speed + "ms",
   tags: [],
   priority: 0,
   proxyMode: "none",
   customProxy: ""
 }));
 
-fs.writeFileSync(
-  "omnibox.json",
-  JSON.stringify({ sites: converted }, null, 2)
-);
+// ===== 生成 CMS 纯接口版 =====
+const cms = validItems.map(item => ({
+  name: item.name,
+  api: item.api,
+  speed: item.speed
+}));
 
-console.log("转换完成，共", converted.length, "条");
+// ===== 输出文件 =====
+fs.writeFileSync("omnibox.json", JSON.stringify({ sites: omnibox }, null, 2));
+fs.writeFileSync("cms.json", JSON.stringify(cms, null, 2));
+fs.writeFileSync("report.json", JSON.stringify(stats, null, 2));
+
+console.log("转换完成");
+console.log(stats);
